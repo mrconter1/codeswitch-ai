@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: codeswitch-ai
-        image: codeswitch-ai:local
-        imagePullPolicy: Never
+        image: 340752818167.dkr.ecr.eu-north-1.amazonaws.com/codeswitch-ai:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
