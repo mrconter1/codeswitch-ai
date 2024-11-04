@@ -1,8 +1,10 @@
 package wikicache
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -29,8 +31,11 @@ func (ac *ArticleCache) GetArticle(title string) (string, error) {
 	ac.mutex.RUnlock()
 
 	if found {
+		log.Printf("Cache hit for title: %s\n", title)
 		return content, nil
 	}
+
+	log.Printf("Cache miss for title: %s. Fetching from Wikipedia...\n", title)
 
 	// Fetch article since it's not in cache
 	content, err := fetchArticleFromWikipedia(title)
@@ -67,5 +72,26 @@ func fetchArticleFromWikipedia(title string) (string, error) {
 		return "", err
 	}
 
-	return string(body), nil
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+
+	// Navigate the JSON to extract the HTML content
+	parse, ok := result["parse"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected response format: missing 'parse'")
+	}
+
+	text, ok := parse["text"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected response format: missing 'text'")
+	}
+
+	htmlContent, ok := text["*"].(string)
+	if !ok {
+		return "", fmt.Errorf("unexpected response format: missing '*'")
+	}
+
+	return htmlContent, nil
 }

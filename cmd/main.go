@@ -28,8 +28,8 @@ func main() {
 			return
 		}
 
-		// Set content type to JSON
-		w.Header().Set("Content-Type", "application/json")
+		// Set content type to HTML
+		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(content))
 	})
 
