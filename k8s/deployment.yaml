@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codeswitch-ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: codeswitch-ai
+  template:
+    metadata:
+      labels:
+        app: codeswitch-ai
+    spec:
+      containers:
+      - name: codeswitch-ai
+        image: codeswitch-ai:local
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
