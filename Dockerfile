@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.20 AS builder
+FROM golang:1.23 AS builder
 
 WORKDIR /app
 
@@ -20,11 +20,17 @@ FROM alpine:latest
 
 WORKDIR /app
 
+# Install libc compatibility layer
+RUN apk add --no-cache libc6-compat
+
 # Copy the binary from the builder
 COPY --from=builder /app/codeswitch-ai .
+
+# Ensure the binary is executable
+RUN chmod +x /app/codeswitch-ai
 
 # Expose port 8080
 EXPOSE 8080
 
 # Command to run the executable
-CMD ["./codeswitch-ai"]
+CMD ["/app/codeswitch-ai"]
