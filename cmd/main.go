@@ -1,39 +1,38 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
+	"os"
 
-	"github.com/mrconter1/codeswitch-ai/pkg/wikicache"
+	"github.com/mrconter1/codeswitch-ai/internal/gateway"
+	"github.com/mrconter1/codeswitch-ai/internal/processor"
+	"github.com/mrconter1/codeswitch-ai/pkg/cache"
+	"github.com/mrconter1/codeswitch-ai/pkg/claude"
 )
 
 func main() {
-	// Create a new article cache
-	cache := wikicache.NewArticleCache()
+	// Initialize Claude client
+	claudeClient := claude.New(os.Getenv("CLAUDE_API_KEY"))
 
-	// Define the handler function
-	http.HandleFunc("/article", func(w http.ResponseWriter, r *http.Request) {
-		// Get the 'title' query parameter
-		title := r.URL.Query().Get("title")
-		if title == "" {
-			http.Error(w, "Title parameter is missing", http.StatusBadRequest)
-			return
-		}
+	// Initialize cache
+	cache, err := cache.New(os.Getenv("REDIS_URL"))
+	if err != nil {
+		log.Fatalf("Failed to initialize cache: %v", err)
+	}
 
-		// Get the article content
-		content, err := cache.GetArticle(title)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error fetching article: %v", err), http.StatusInternalServerError)
-			return
-		}
+	// Initialize processor
+	processor := processor.New(claudeClient)
 
-		// Set content type to HTML
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(content))
-	})
+	// Initialize gateway
+	gateway := gateway.New(cache, processor)
 
-	// Start the server
-	fmt.Println("Server is running on port 8080...")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Setup routes
+	http.HandleFunc("/codeswitch", gateway.HandleCodeSwitch)
+
+	// Start server
+	log.Printf("Server starting on :8080...")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
