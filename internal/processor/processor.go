@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -81,7 +80,8 @@ func (p *Processor) loadFrequencyData() error {
 			}
 		}
 
-		log.Printf("Loaded %d English words and %d Swedish words", len(p.enWordFreqs), len(p.svWordFreqs))
+		log.Printf("Loaded %d English words and %d Swedish words",
+			len(p.enWordFreqs), len(p.svWordFreqs))
 	})
 
 	return nil
@@ -140,48 +140,110 @@ func (p *Processor) findWordsToTranslate(text string, numWords int) []string {
 	return result
 }
 
+func (p *Processor) createCodeSwitchPrompt(content string, originalWords []string, sourceLang, targetLang string) string {
+	// Create a bullet list of words with their contexts
+	var wordContexts []string
+	for _, word := range originalWords {
+		// Find a few words before and after for context
+		index := strings.Index(strings.ToLower(content), strings.ToLower(word))
+		if index >= 0 {
+			start := max(0, index-20)
+			end := min(len(content), index+len(word)+20)
+			context := content[start:end]
+			wordContexts = append(wordContexts, fmt.Sprintf("• %q appears in: %q", word, context))
+		}
+	}
+
+	prompt := fmt.Sprintf(`You are a skilled linguistic expert in code-switching between %s and %s. 
+Please create a naturally code-switched version of this text by translating ONLY the specified words from %s to %s.
+
+Original paragraph:
+%s
+
+Words to translate (with their contexts):
+%s
+
+Instructions:
+1. ONLY translate the listed words to %s
+2. Keep all other words in their original %s form
+3. Ensure grammatical agreement between the languages
+4. Maintain all original formatting, punctuation, and capitalization
+5. The translation should feel natural and maintain readability
+6. Adapt articles and word forms to fit the grammar of both languages
+
+Example code-switching:
+English: "The cat was sleeping on the table"
+Words to switch: [was, on, the]
+Result: "The cat var sleeping på table"
+
+Please provide ONLY the code-switched paragraph as output, without explanations.`,
+		sourceLang, targetLang,
+		sourceLang, targetLang,
+		content,
+		strings.Join(wordContexts, "\n"),
+		targetLang,
+		sourceLang)
+
+	log.Printf("Created prompt for %d words. First few words to translate: %v",
+		len(originalWords),
+		originalWords[:min(5, len(originalWords))])
+
+	return prompt
+}
+
 func (p *Processor) ProcessParagraph(content, sourceLang, targetLang string, percentage float64) (string, error) {
 	// Ensure frequency data is loaded
 	if err := p.loadFrequencyData(); err != nil {
 		return "", fmt.Errorf("failed to load frequency data: %v", err)
 	}
 
-	// Log processing start
-	log.Printf("Processing paragraph (%.0f%% target): %s...", percentage, content[:int(math.Min(float64(len(content)), 50))])
+	log.Printf("Processing paragraph (%.0f%% target): %s...",
+		percentage,
+		content[:min(50, len(content))])
 
 	// Calculate number of words needed based on Zipf's law
 	wordsNeeded := p.calculateWordsNeeded(percentage)
-	log.Printf("Calculated need for %d top-frequency words to achieve %.0f%%", wordsNeeded, percentage)
+	log.Printf("Calculated need for %d top-frequency words to achieve %.0f%%",
+		wordsNeeded,
+		percentage)
 
 	// Find actual words to translate
 	wordsToTranslate := p.findWordsToTranslate(content, wordsNeeded)
-	log.Printf("Found %d matching high-frequency words in text: %v", len(wordsToTranslate), wordsToTranslate)
+	log.Printf("Found %d matching high-frequency words in text: %v",
+		len(wordsToTranslate),
+		wordsToTranslate)
 
 	// Wait for rate limiter
 	<-p.rateLimiter
 
-	// Context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Create prompt for Claude
-	prompt := fmt.Sprintf(`Given this paragraph in %s:
-
-%s
-
-Please translate ONLY these specific words to %s, keeping their exact position and context in the sentence. 
-Words to translate: %v
-
-Keep all other words unchanged. Maintain the original format, spacing, and punctuation.`,
-		sourceLang, content, targetLang, wordsToTranslate)
+	// Create prompt
+	prompt := p.createCodeSwitchPrompt(content, wordsToTranslate, sourceLang, targetLang)
 
 	log.Printf("Sending request to Claude for code-switching")
-	result, err := p.claudeClient.Complete(ctx, prompt)
+	result, err := p.claudeClient.Complete(context.Background(), prompt)
 	if err != nil {
-		log.Printf("Error from Claude: %v", err)
-		return "", err
+		return "", fmt.Errorf("error from Claude: %v", err)
 	}
 
-	log.Printf("Successfully processed paragraph: %s...", result[:int(math.Min(float64(len(result)), 50))])
+	// Log a preview of the result
+	log.Printf("Successfully processed paragraph: %s...",
+		result[:min(50, len(result))])
+
 	return result, nil
+}
+
+// Helper function for min
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Helper function for max
+func max(a, b int) int {
+	if a < b {
+		return b
+	}
+	return a
 }
