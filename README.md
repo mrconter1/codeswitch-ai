@@ -1,114 +1,183 @@
-# codeswitch-ai
+# CodeSwitch AI 🔄
 
-`codeswitch-ai` is a Go application designed to retrieve and display information from Wikipedia articles. This guide walks you through setting up and deploying the application both locally (using Docker and Kubernetes) and on AWS (using Amazon Elastic Kubernetes Service - EKS).
+[![Go Version](https://img.shields.io/github/go-mod/go-version/mrconter1/codeswitch-ai)](https://go.dev/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Table of Contents
-1. [Local Setup](#local-setup)
-2. [Deploying to AWS EKS](#deploying-to-aws-eks)
-3. [Resources](#resources)
+A sophisticated code-switching service that intelligently mixes languages in text while maintaining natural readability and grammar. Currently supports English ↔ Swedish code-switching with customizable mixing ratios.
 
----
+## 🌟 Features
 
-### Local Setup
+- **Intelligent Code-Switching**: Uses frequency analysis and AI to create natural language mixing
+- **Customizable Mix Ratio**: Control how much of each language appears in the output
+- **Natural Grammar**: Maintains grammatical correctness across language boundaries
+- **Frequency-Based Word Selection**: Uses Zipf's law and real language frequency data
+- **Caching**: Built-in Redis caching for efficient repeated processing
+- **Kubernetes Ready**: Full deployment configuration included
 
-To run `codeswitch-ai` locally, we use Docker and a local Kubernetes cluster provided by Docker Desktop.
+## 🚀 Quick Start
 
-#### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop) with Kubernetes enabled
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) installed and configured
+### Prerequisites
 
-#### Steps
+- Go 1.23+
+- Docker Desktop with Kubernetes enabled
+- Claude API key from Anthropic
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/mrconter1/codeswitch-ai.git
-   cd codeswitch-ai
-   ```
+### Local Development
 
-2. **Build the Docker Image**:
-   ```bash
-   docker build -t codeswitch-ai:latest .
-   ```
+1. Clone the repository:
+```bash
+git clone https://github.com/mrconter1/codeswitch-ai.git
+cd codeswitch-ai
+```
 
-3. **Setup Kubernetes Configurations**:
-   - We use `k8s/deployment.yaml` and `k8s/service.yaml` for Kubernetes deployment.
+2. Create Kubernetes secret for Claude API:
+```bash
+kubectl create secret generic codeswitch-secrets \
+  --from-literal=claude-api-key=your-api-key-here
+```
 
-4. **Deploy to Kubernetes**:
-   - Apply the Kubernetes configurations:
-     ```bash
-     kubectl apply -f k8s/
-     ```
-   - Confirm the deployment and service status:
-     ```bash
-     kubectl get pods
-     kubectl get services
-     ```
+3. Build and deploy:
+```bash
+# Build Docker image
+docker build -t codeswitch-ai:latest .
 
-5. **Access the Application Locally**:
-   - Access the app at `http://localhost:<NodePort>/article?title=Go_(programming_language)`, replacing `<NodePort>` with the assigned NodePort (use `kubectl get services` to find the port).
+# Deploy to local Kubernetes
+kubectl apply -f k8s/local.yaml
 
----
+# Watch the logs
+kubectl logs -f deployment/codeswitch-ai
+```
 
-### Deploying to AWS EKS
+4. Test the service:
+```bash
+go run cmd/test/main.go -title="Albert_Einstein" -percent=50
+```
 
-To host `codeswitch-ai` on AWS, we’ll use Amazon Elastic Kubernetes Service (EKS) with `eksctl`.
+## 🏗️ Architecture
 
-#### Prerequisites
-- [AWS CLI](https://aws.amazon.com/cli/) configured with an IAM user with EKS permissions
-- [eksctl](https://eksctl.io/) installed
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) installed and configured
+### Components
 
-#### Steps
+```
+├── api/              # API types and interfaces
+├── cmd/
+│   ├── main.go      # Main service entry point
+│   └── test/        # Test client
+├── internal/
+│   ├── gateway/     # HTTP handlers
+│   └── processor/   # Code-switching logic
+├── k8s/             # Kubernetes configurations
+└── pkg/
+    ├── cache/       # Redis caching
+    └── claude/      # Claude API client
+```
 
-1. **Set Up EKS Cluster**:
-   - Run `eksctl` to create a new EKS cluster:
-     ```bash
-     eksctl create cluster --name codeswitch-ai-cluster --region us-west-2 --nodes 1
-     ```
+### Key Features Explained
 
-2. **Configure `kubectl` for EKS**:
-   - Connect `kubectl` to your new EKS cluster:
-     ```bash
-     aws eks --region us-west-2 update-kubeconfig --name codeswitch-ai-cluster
-     ```
+#### Frequency Analysis
+The service uses real language frequency data to determine which words to translate:
+- Loads frequency dictionaries for both languages
+- Uses Zipf's law to calculate required word count
+- Matches high-frequency words in the text
 
-3. **Build and Push Docker Image to ECR**:
-   - Go to **ECR (Elastic Container Registry)** in the AWS Console, create a repository named `codeswitch-ai`, and note the URI.
-   - Tag and push your Docker image to ECR:
-     ```bash
-     docker tag codeswitch-ai:latest <your-ecr-repo-uri>:latest
-     docker push <your-ecr-repo-uri>:latest
-     ```
+#### Code-Switching Algorithm
+1. Analyzes input text for high-frequency words
+2. Calculates optimal translation targets
+3. Preserves context and grammar
+4. Uses Claude AI for natural translations
 
-4. **Update Kubernetes Deployment for ECR**:
-   - In `k8s/deployment.yaml`, update the image to use your ECR URI:
-     ```yaml
-     containers:
-     - name: codeswitch-ai
-       image: <your-ecr-repo-uri>:latest
-     ```
+#### Caching Layer
+- Redis-based caching
+- Stores processed articles
+- 24-hour cache lifetime
+- Automatic cache population
 
-5. **Deploy to EKS**:
-   - Apply the updated Kubernetes configurations:
-     ```bash
-     kubectl apply -f k8s/
-     ```
+## 📝 API Reference
 
-6. **Access the Application on AWS**:
-   - With the `LoadBalancer` service type, AWS will assign a public IP to your application. Run:
-     ```bash
-     kubectl get services
-     ```
-   - Access the application using the public IP in the output, with the URL:
-     ```
-     http://<external-ip>:8080/article?title=Go_(programming_language)
-     ```
+### Code-Switch Request
+```json
+POST /codeswitch
+{
+    "title": "Article_Title",
+    "sourceLang": "en",
+    "targetLang": "sv",
+    "percentage": 50.0
+}
+```
 
----
+### Response
+```json
+{
+    "html": "<processed content>",
+    "title": "Article_Title",
+    "language": "sv"
+}
+```
 
-### Resources
+## 🔧 Configuration
 
-- **Docker Desktop**: [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
-- **AWS CLI**: [https://aws.amazon.com/cli/](https://aws.amazon.com/cli/)
-- **eksctl**: [https://eksctl.io/](https://eksctl.io/)
-- **kubectl**: [https://kubernetes.io/docs/tasks/tools/install-kubectl/](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+The service can be configured through environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CLAUDE_API_KEY` | Anthropic API key | Required |
+| `REDIS_URL` | Redis connection URL | `redis://redis-service:6379` |
+
+## 📊 Example
+
+Input text:
+```
+The cat was sleeping on the table
+```
+
+With 50% Swedish code-switching:
+```
+The cat var sovande på det table
+```
+
+## 🛠️ Development
+
+### Building from Source
+```bash
+# Get dependencies
+go mod tidy
+
+# Build
+go build -o codeswitch-ai ./cmd/main.go
+```
+
+### Running Tests
+```bash
+go test ./...
+```
+
+### Local Development with Docker Compose
+```bash
+docker-compose up -d
+```
+
+## 📈 Future Improvements
+
+- [ ] Support for more language pairs
+- [ ] Advanced grammar handling
+- [ ] Real-time processing mode
+- [ ] Performance optimization for long texts
+- [ ] Web interface for easy testing
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
+
+## ✨ Acknowledgments
+
+- [FrequencyWords](https://github.com/hermitdave/FrequencyWords) for language frequency data
+- [Anthropic](https://www.anthropic.com/) for Claude AI capabilities
