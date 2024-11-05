@@ -16,8 +16,9 @@ type Client struct {
 }
 
 type request struct {
-	Model    string    `json:"model"`
-	Messages []message `json:"messages"`
+	Model     string    `json:"model"`
+	MaxTokens int       `json:"max_tokens"`
+	Messages  []message `json:"messages"`
 }
 
 type message struct {
@@ -26,7 +27,9 @@ type message struct {
 }
 
 type response struct {
-	Content string `json:"content"`
+	Content []struct {
+		Text string `json:"text"`
+	} `json:"content"`
 }
 
 func New(apiKey string) *Client {
@@ -39,7 +42,8 @@ func New(apiKey string) *Client {
 
 func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 	req := request{
-		Model: "claude-3-sonnet-20240229",
+		Model:     "claude-3-sonnet-20240229",
+		MaxTokens: 1024,
 		Messages: []message{
 			{
 				Role:    "user",
@@ -58,9 +62,10 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("error creating request: %v", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
+	// Set the required headers
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("content-type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -69,7 +74,11 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		var errorBody map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&errorBody); err != nil {
+			return "", fmt.Errorf("Claude API error (status %d): could not decode error body", resp.StatusCode)
+		}
+		return "", fmt.Errorf("Claude API error (status %d): %v", resp.StatusCode, errorBody)
 	}
 
 	var result response
@@ -77,5 +86,9 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("error decoding response: %v", err)
 	}
 
-	return result.Content, nil
+	if len(result.Content) == 0 {
+		return "", fmt.Errorf("empty response from Claude")
+	}
+
+	return result.Content[0].Text, nil
 }
