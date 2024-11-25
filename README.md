@@ -84,15 +84,21 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
   // Redis Pod Cluster
   // - Primary + replicas, persistent storage
   // - Handles both caching and rate limiting
-  // - Global rate limiting across all pods
+  // - Maintains separate rate limits for Wikipedia and Claude
+  
+  // Wikipedia Rate Limiter
+  // - Global rate limiting for Wikipedia API
+  // - Respects Wikipedia's rate limits (100 rpm)
+  // - Automatic request queuing
+  if !wikipediaRateLimiter.Allow(ctx):
+    waitForWikipediaQuota()
   wikipediaHtml = getFromCacheOrWikipedia(title)
   
-  // Global Rate Limiter
+  // Claude Rate Limiter
   // - Distributed rate limiting using Redis
   // - Enforces cluster-wide Claude API limits
   // - Configurable RPM/TPM limits
-  // - Automatic request queuing when near limits
-  rateLimiter = getGlobalRateLimiter()
+  claudeRateLimiter = getClaudeRateLimiter()
 
   // Parser Pod
   // - Handles HTML parsing and text extraction
@@ -116,11 +122,11 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
     while hasWork:
       paragraph = consumeFromQueue()
       
-      // Rate Limit Check
-      // - Check global rate limit before processing
+      // Claude Rate Limit Check
+      // - Check global Claude rate limit before processing
       // - Back-off if limit exceeded
       // - Requeue message if needed
-      if !rateLimiter.Allow(ctx):
+      if !claudeRateLimiter.Allow(ctx):
         requeueWithBackoff(paragraph)
         continue
       
