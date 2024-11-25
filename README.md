@@ -130,8 +130,22 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
         requeueWithBackoff(paragraph)
         continue
       
-      frequencyData = getLanguageFrequencies(sourceLang)
-      wordsToTranslate = selectWordsByFrequency(paragraph, frequencyData, percent)
+      // Language Frequency Analysis
+      // - Uses pre-computed word frequency lists
+      // - Zipf's law based selection
+      // - Targets specific percentage of total words
+      commonWords = getTopNCommonWords(
+        sourceLang,
+        targetPercentage: percent,
+        // e.g., if percent=50, might return top 1000 words 
+        // which statistically cover ~50% of any text
+      )
+      
+      // Word Selection
+      // - Identifies words from the common word list in the text
+      // - Maintains consistent translation for same words
+      // - Skips proper nouns and special terms
+      wordsToTranslate = findCommonWordsInText(paragraph, commonWords)
       
       // Claude API interaction
       // - Connection pooling
