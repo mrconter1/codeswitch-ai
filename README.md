@@ -91,6 +91,94 @@ The service uses real language frequency data to determine which words to transl
 - 24-hour cache lifetime
 - Automatic cache population
 
+## 📝 Process Flow & Pod Architecture
+
+```typescript
+// Pod Types & Roles:
+const pods = {
+  gateway: {
+    role: "Handles incoming HTTP requests, orchestrates flow",
+    scaling: "HPA based on CPU/request count",
+    count: "2-10 replicas"
+  },
+  redis: {
+    role: "Caches Wikipedia articles",
+    scaling: "Primary + 2 replicas",
+    persistence: "Yes - PVC mounted"
+  },
+  processor: {
+    role: "Handles language processing & Claude API calls",
+    scaling: "HPA based on queue length & CPU",
+    count: "3-20 replicas",
+    resources: "High CPU/Memory for NLP tasks"
+  }
+}
+
+// High-level request flow
+async function processArticle(request) {
+  // 1. Gateway Pod receives request
+  // Load balanced across gateway replicas
+  gatewayPod.receive({
+    title: "Albert_Einstein",
+    sourceLang: "en",
+    targetLang: "sv",
+    switchPercent: 50
+  })
+
+  // 2. Redis Pod - Article Caching
+  const article = await redisPod.getOrFetch(request.title)
+  // On cache miss, fetches from Wikipedia
+  // Stores with 24h TTL
+
+  // 3. Processor Pods - Work Queue
+  // Paragraphs distributed via Redis work queue
+  const workQueue = {
+    add: "Gateway adds paragraphs to queue",
+    process: "Processor pods consume from queue",
+    monitor: "HPA watches queue length"
+  }
+
+  // 4. Processor Pod - Each pod runs:
+  class ProcessorPod {
+    // Shared frequency data cached in pod memory
+    freqData = loadFrequencyDictionaries()
+    
+    async processQueue() {
+      while (true) {
+        // Get next paragraph(s) from queue
+        const work = await queue.getNext()
+        
+        // Process with Claude API
+        // Connection pooling per pod
+        const result = await this.processWithClaude(work)
+        
+        // Mark work complete
+        await queue.complete(work.id, result)
+      }
+    }
+  }
+
+  // 5. Gateway Pod - Result Assembly
+  return gatewayPod.assembleAndRespond(results)
+}
+
+// Key Scaling Points:
+const scaling = {
+  gatewayPods: "Scales on HTTP traffic",
+  processorPods: "Scales on queue length",
+  claudeAPI: "Rate limits managed per pod",
+  redis: "Data replication across replicas"
+}
+
+// Pod Communication:
+const dataFlow = {
+  gateway_to_redis: "Direct TCP connection",
+  gateway_to_queue: "Redis pub/sub",
+  processor_to_claude: "HTTPS with connection pool",
+  processor_to_queue: "Redis pub/sub"
+}
+```
+
 ## 📝 API Reference
 
 ### Code-Switch Request
