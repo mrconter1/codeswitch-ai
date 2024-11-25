@@ -75,56 +75,59 @@ go run cmd/test/main.go -title="Albert_Einstein" -percent=50
 
 ```typescript
 // High-level request flow
-async function processArticle(request) {
+async function returnPartiallyCodeSwitchedWikipediaArticle(
+  articleTitle: string,
+  sourceLanguage: string,
+  targetLanguage: string,
+  translatePercentage: number
+) {
   // 1. Gateway Pod receives request
   // - Load balanced across gateway replicas (scales with HTTP traffic)
   // - Direct TCP connection to Redis
-  gatewayPod.receive({
-    title: "Albert_Einstein",
-    sourceLang: "en",
-    targetLang: "sv",
-    switchPercent: 50
-  })
+  const request = {
+    title: articleTitle,
+    sourceLang: sourceLanguage,
+    targetLang: targetLanguage,
+    percent: translatePercentage
+  }
 
   // 2. Redis Pod - Article Caching
   // - Primary pod with 2 replicas for HA
   // - Data replication across replicas
   // - Persistent volume for data storage
-  const article = await redisPod.getOrFetch(request.title)
-  // On cache miss, fetches from Wikipedia
-  // Stores with 24h TTL
+  const wikipediaHtml = await redisPod.getOrFetchArticle(articleTitle)
 
   // 3. Processor Pods - Work Queue
   // - Uses Redis pub/sub for work distribution
   // - HPA scales pods based on queue length
   // - Each pod manages own Claude API rate limits
-  const paragraphs = splitIntoParagraphs(article)
-  await workQueue.addBatch(paragraphs)
+  const paragraphs = extractParagraphsFromHtml(wikipediaHtml)
+  await workQueue.addParagraphsForProcessing(paragraphs)
 
   // 4. Processor Pod - Each pod runs:
-  class ProcessorPod {
+  class LanguageProcessorPod {
     // Shared frequency data cached in pod memory
     // Connection pooling for Claude API calls
-    freqData = loadFrequencyDictionaries()
+    freqData = loadLanguageFrequencyData()
     
-    async processQueue() {
+    async processQueuedParagraphs() {
       while (true) {
         // Get next work via Redis pub/sub
-        const work = await queue.getNext()
+        const paragraph = await queue.getNextParagraph()
         
         // Process with Claude API
         // Rate limits managed per pod
-        const result = await this.processWithClaude(work)
+        const codeSwitchedText = await this.translateWithClaude(paragraph)
         
         // Mark work complete via pub/sub
-        await queue.complete(work.id, result)
+        await queue.markParagraphComplete(paragraph.id, codeSwitchedText)
       }
     }
   }
 
   // 5. Gateway Pod - Result Assembly
   // Collects results via Redis pub/sub
-  return gatewayPod.assembleAndRespond(results)
+  return gatewayPod.assembleCodeSwitchedArticle(results)
 }
 ```
 
