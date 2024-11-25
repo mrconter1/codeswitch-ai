@@ -11,8 +11,11 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
-# Build the application
-RUN go build -o codeswitch-ai ./cmd/main.go
+# Build all binaries
+RUN go build -o bin/gateway ./cmd/gateway/main.go && \
+    go build -o bin/processor ./cmd/processor/main.go && \
+    go build -o bin/frequency-calculator ./cmd/frequency-calculator/main.go && \
+    go build -o bin/result-collector ./cmd/result-collector/main.go
 
 # Runtime stage
 FROM alpine:latest
@@ -22,14 +25,14 @@ WORKDIR /app
 # Install libc compatibility layer
 RUN apk add --no-cache libc6-compat
 
-# Copy the binary from the builder
-COPY --from=builder /app/codeswitch-ai .
+# Copy binaries from builder
+COPY --from=builder /app/bin/* /app/
 
-# Ensure the binary is executable
-RUN chmod +x /app/codeswitch-ai
+# Ensure binaries are executable
+RUN chmod +x /app/*
 
 # Expose port 8080
 EXPOSE 8080
 
-# Command to run the executable
-CMD ["/app/codeswitch-ai"]
+# Command will be specified in k8s deployment
+CMD ["./gateway"]

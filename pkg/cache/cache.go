@@ -36,6 +36,16 @@ func New(redisURL string) (*Cache, error) {
 	return &Cache{client: client}, nil
 }
 
+// Set stores a value in the cache with an expiration time
+func (c *Cache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	return c.client.Set(ctx, key, value, expiration).Err()
+}
+
+// Get retrieves a value from the cache
+func (c *Cache) Get(ctx context.Context, key string) (string, error) {
+	return c.client.Get(ctx, key).Result()
+}
+
 func (c *Cache) GetArticle(title string) (string, error) {
 	ctx := context.Background()
 
