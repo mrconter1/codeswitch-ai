@@ -76,15 +76,18 @@ go run cmd/test/main.go -title="Albert_Einstein" -percent=50
 ```typescript
 // High-level flow showing which pod handles each step
 returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, percent) {
-  // Gateway Pod
+  // Ingress Gateway Pod
   // - Load balanced, scales with HTTP traffic
+  // - Handles initial request validation
   validateAndParseRequest()
 
   // Redis Pod
   // - Primary + replicas, persistent storage
   wikipediaHtml = getFromCacheOrWikipedia(title)
 
-  // Gateway Pod
+  // Parser Pod
+  // - Handles HTML parsing and text extraction
+  // - Prepares work units
   paragraphs = splitHtmlIntoParagraphs(wikipediaHtml)
 
   // RabbitMQ Message Broker
@@ -116,14 +119,14 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
       
       // Results handling
       // - Publish to results exchange
-      // - Acknowledge successful processing
       publishResult(codeSwitchedText)
 
-  // Gateway Pod
+  // Result Collector Pod
   // - Subscribes to results exchange
   // - Handles timeouts and partial failures
-  // - Maintains result order
-  return assembleCodeSwitchedArticle()
+  // - Maintains paragraph order
+  // - Assembles final HTML
+  return assembleAndValidateArticle()
 }
 ```
 
