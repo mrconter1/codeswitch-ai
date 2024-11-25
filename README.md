@@ -78,50 +78,36 @@ go run cmd/test/main.go -title="Albert_Einstein" -percent=50
 ## 📝 Process Flow & Pod Architecture
 
 ```typescript
-// Frequency Fetcher Pod (Single pod)
-// Handles raw frequency list management
-getFullFrequencyList(language: string): string[] {
-  // Simple Redis GET
-  cachedList = redis.Get(`freq:${language}:raw`)
-  if (cachedList) return cachedList
-
-  // First time request for this language
-  rawList = fetchFromGithub(
-    `github.com/hermitdave/FrequencyWords/content/2018/${language}/${language}_50k.txt`
-  )
-  
-  // Store in Redis with infinite TTL
-  redis.Set(`freq:${language}:raw`, rawList)
-  
-  return rawList
+// Single Fetcher Pod
+// - Simple caching layer
+// - Rare GitHub fetches
+// - No computation
+function getFullList(language: string): string[] {
+  return cachedOrFetch()  // Redis + GitHub fallback
 }
 
-// Frequency Calculator Pods (Scalable)
-// Handles percentage-based calculations
-getWordsForPercentage(sourceLang: string, targetPercent: number): string[] {
-  // Try to get pre-calculated percentage list
-  cacheKey = `freq:${sourceLang}:${targetPercent}`
-  cachedResult = redis.Get(cacheKey)
-  if (cachedResult) return cachedResult
+// Multiple Calculator Pods
+// - Handles all percentage calculations
+// - Horizontally scalable
+// - More computation heavy
+function getWordsForPercentage(sourceLang: string, percent: number): string[] {
+  // Using Zipf's law: word frequency is inversely proportional to rank
+  // Example coverage:
+  // - Top ~135 words = ~50% of typical text
+  // - Top ~2000 words = ~80% of typical text
+  // - Top ~4000 words = ~90% of typical text
   
-  // Calculate if not in cache
-  fullList = getFullFrequencyList(sourceLang)
-  topN = calculateTopNForPercentage(fullList, targetPercent)
-  result = fullList.slice(0, topN)
-  
-  // Cache result with long TTL
-  redis.SetEx(cacheKey, result, "24h")
-  
-  return result
+  fullList = getFullList(sourceLang)  // Single source
+  return calculateAndCache(fullList, percent)  // Redis caching
 }
 
 // Main service flow
-returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, percent) {
+function returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, percent) {
   // Ingress Gateway Pod
   validateAndParseRequest()
 
   // Wikipedia Rate Limiter
-  if !wikipediaRateLimiter.Allow(ctx):
+  if (!wikipediaRateLimiter.Allow(ctx))
     waitForWikipediaQuota()
   wikipediaHtml = getFromCacheOrWikipedia(title)
   
@@ -138,13 +124,14 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
   publishParagraphsToQueue(paragraphs)
 
   // Multiple Processor Pods
-  foreach processor in processorPool:
-    while hasWork:
+  foreach (processor in processorPool) {
+    while (hasWork) {
       paragraph = consumeFromQueue()
       
-      if !claudeRateLimiter.Allow(ctx):
+      if (!claudeRateLimiter.Allow(ctx)) {
         requeueWithBackoff(paragraph)
         continue
+      }
       
       // Word Selection
       wordsToTranslate = findCommonWordsInText(paragraph, commonWords)
@@ -157,6 +144,8 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
       )
       
       publishResult(codeSwitchedText)
+    }
+  }
 
   // Result Collector Pod
   return assembleAndValidateArticle()
