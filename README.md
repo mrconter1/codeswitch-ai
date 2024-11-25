@@ -87,22 +87,42 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
   // Gateway Pod
   paragraphs = splitHtmlIntoParagraphs(wikipediaHtml)
 
-  // Redis Work Queue
-  // - Distributes work to processor pods
-  // - Pods scale based on queue length
-  addToProcessingQueue(paragraphs)
+  // RabbitMQ Message Broker
+  // - Durable queues for reliability
+  // - Fan-out exchange for work distribution
+  // - Dead letter queue for failed jobs
+  publishParagraphsToQueue(paragraphs)
 
   // Multiple Processor Pods
-  // - Each handles multiple paragraphs
-  // - Manages own Claude API rate limits
-  foreach paragraph in queue:
-    frequencyData = getLanguageFrequencies()
-    wordsToTranslate = selectWordsByFrequency(percent)
-    codeSwitchedText = askClaudeToTranslate(wordsToTranslate)
-    markParagraphComplete(codeSwitchedText)
+  // - Subscribe to RabbitMQ work queue
+  // - Automatic work distribution
+  // - Health checks and redelivery
+  // - Scales based on queue depth
+  foreach processor in processorPool:
+    while hasWork:
+      paragraph = consumeFromQueue()
+      frequencyData = getLanguageFrequencies(sourceLang)
+      wordsToTranslate = selectWordsByFrequency(paragraph, frequencyData, percent)
+      
+      // Claude API interaction
+      // - Connection pooling
+      // - Rate limiting per pod
+      // - Automatic retries
+      codeSwitchedText = askClaudeToTranslate(
+        paragraph,
+        wordsToTranslate,
+        targetLang
+      )
+      
+      // Results handling
+      // - Publish to results exchange
+      // - Acknowledge successful processing
+      publishResult(codeSwitchedText)
 
   // Gateway Pod
-  // - Collects and assembles results
+  // - Subscribes to results exchange
+  // - Handles timeouts and partial failures
+  // - Maintains result order
   return assembleCodeSwitchedArticle()
 }
 ```
