@@ -58,113 +58,107 @@ go run cmd/test/main.go -title="Albert_Einstein" -percent=50
 ### Components
 
 ```
-├── api/              # API types and interfaces
+├── api/              
 ├── cmd/
-│   ├── main.go      # Main service entry point
-│   └── test/        # Test client
+│   ├── main.go      
+│   └── test/        
 ├── internal/
-│   ├── gateway/     # HTTP handlers
-│   └── processor/   # Code-switching logic
-├── k8s/             # Kubernetes configurations
+│   ├── gateway/     
+│   ├── processor/   
+│   ├── frequency/   
+│   │   ├── fetcher/ # Raw frequency list management
+│   │   └── calc/    # Percentage calculations
+├── k8s/             
 └── pkg/
-    ├── cache/       # Redis caching
-    └── claude/      # Claude API client
+    ├── cache/       
+    ├── claude/      
+    └── wordlist/    # Language frequency data
 ```
 
 ## 📝 Process Flow & Pod Architecture
 
 ```typescript
-// High-level flow showing which pod handles each step
+// Frequency Fetcher Pod (Single pod)
+// Handles raw frequency list management
+getFullFrequencyList(language: string): string[] {
+  // Simple Redis GET
+  cachedList = redis.Get(`freq:${language}:raw`)
+  if (cachedList) return cachedList
+
+  // First time request for this language
+  rawList = fetchFromGithub(
+    `github.com/hermitdave/FrequencyWords/content/2018/${language}/${language}_50k.txt`
+  )
+  
+  // Store in Redis with infinite TTL
+  redis.Set(`freq:${language}:raw`, rawList)
+  
+  return rawList
+}
+
+// Frequency Calculator Pods (Scalable)
+// Handles percentage-based calculations
+getWordsForPercentage(sourceLang: string, targetPercent: number): string[] {
+  // Try to get pre-calculated percentage list
+  cacheKey = `freq:${sourceLang}:${targetPercent}`
+  cachedResult = redis.Get(cacheKey)
+  if (cachedResult) return cachedResult
+  
+  // Calculate if not in cache
+  fullList = getFullFrequencyList(sourceLang)
+  topN = calculateTopNForPercentage(fullList, targetPercent)
+  result = fullList.slice(0, topN)
+  
+  // Cache result with long TTL
+  redis.SetEx(cacheKey, result, "24h")
+  
+  return result
+}
+
+// Main service flow
 returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, percent) {
   // Ingress Gateway Pod
-  // - Load balanced, scales with HTTP traffic
-  // - Handles initial request validation
   validateAndParseRequest()
 
-  // Redis Pod Cluster
-  // - Primary + replicas, persistent storage
-  // - Handles both caching and rate limiting
-  // - Maintains separate rate limits for Wikipedia and Claude
-  
   // Wikipedia Rate Limiter
-  // - Global rate limiting for Wikipedia API
-  // - Respects Wikipedia's rate limits (100 rpm)
-  // - Automatic request queuing
   if !wikipediaRateLimiter.Allow(ctx):
     waitForWikipediaQuota()
   wikipediaHtml = getFromCacheOrWikipedia(title)
   
   // Claude Rate Limiter
-  // - Distributed rate limiting using Redis
-  // - Enforces cluster-wide Claude API limits
-  // - Configurable RPM/TPM limits
   claudeRateLimiter = getClaudeRateLimiter()
 
-  // Parser Pod
-  // - Handles HTML parsing and text extraction
-  // - Prepares work units
-  // - Estimates Claude API calls needed
-  paragraphs = splitHtmlIntoParagraphs(wikipediaHtml)
+  // Get words to translate using Frequency Calculator Pod
+  commonWords = getWordsForPercentage(sourceLang, percent)
 
+  // Parser Pod
+  paragraphs = splitHtmlIntoParagraphs(wikipediaHtml)
+  
   // RabbitMQ Message Broker
-  // - Durable queues for reliability
-  // - Fan-out exchange for work distribution
-  // - Dead letter queue for failed jobs
-  // - Rate limit aware message scheduling
   publishParagraphsToQueue(paragraphs)
 
   // Multiple Processor Pods
-  // - Subscribe to RabbitMQ work queue
-  // - Automatic work distribution
-  // - Health checks and redelivery
-  // - Scales based on queue depth
   foreach processor in processorPool:
     while hasWork:
       paragraph = consumeFromQueue()
       
-      // Claude Rate Limit Check
-      // - Check global Claude rate limit before processing
-      // - Back-off if limit exceeded
-      // - Requeue message if needed
       if !claudeRateLimiter.Allow(ctx):
         requeueWithBackoff(paragraph)
         continue
       
-      // Language Frequency Analysis
-      // - Uses pre-computed word frequency lists
-      // - Zipf's law based selection
-      // - Targets specific percentage of total words
-      commonWords = getTopNCommonWords(
-        sourceLang,
-        targetPercentage: percent,
-        // e.g., if percent=50, might return top 1000 words 
-        // which statistically cover ~50% of any text
-      )
-      
       // Word Selection
-      // - Identifies words from the common word list in the text
-      // - Maintains consistent translation for same words
-      // - Skips proper nouns and special terms
       wordsToTranslate = findCommonWordsInText(paragraph, commonWords)
       
       // Claude API interaction
-      // - Connection pooling
-      // - Automatic retries with exponential backoff
-      // - Rate limit aware retries
       codeSwitchedText = askClaudeToTranslate(
         paragraph,
         wordsToTranslate,
         targetLang
       )
       
-      // Results handling
       publishResult(codeSwitchedText)
 
   // Result Collector Pod
-  // - Subscribes to results exchange
-  // - Handles timeouts and partial failures
-  // - Maintains paragraph order
-  // - Assembles final HTML
   return assembleAndValidateArticle()
 }
 ```
