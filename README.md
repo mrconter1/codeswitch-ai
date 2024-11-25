@@ -71,53 +71,14 @@ go run cmd/test/main.go -title="Albert_Einstein" -percent=50
     └── claude/      # Claude API client
 ```
 
-### Key Features Explained
-
-#### Frequency Analysis
-The service uses real language frequency data to determine which words to translate:
-- Loads frequency dictionaries for both languages
-- Uses Zipf's law to calculate required word count
-- Matches high-frequency words in the text
-
-#### Code-Switching Algorithm
-1. Analyzes input text for high-frequency words
-2. Calculates optimal translation targets
-3. Preserves context and grammar
-4. Uses Claude AI for natural translations
-
-#### Caching Layer
-- Redis-based caching
-- Stores processed articles
-- 24-hour cache lifetime
-- Automatic cache population
-
 ## 📝 Process Flow & Pod Architecture
 
 ```typescript
-// Pod Types & Roles:
-const pods = {
-  gateway: {
-    role: "Handles incoming HTTP requests, orchestrates flow",
-    scaling: "HPA based on CPU/request count",
-    count: "2-10 replicas"
-  },
-  redis: {
-    role: "Caches Wikipedia articles",
-    scaling: "Primary + 2 replicas",
-    persistence: "Yes - PVC mounted"
-  },
-  processor: {
-    role: "Handles language processing & Claude API calls",
-    scaling: "HPA based on queue length & CPU",
-    count: "3-20 replicas",
-    resources: "High CPU/Memory for NLP tasks"
-  }
-}
-
 // High-level request flow
 async function processArticle(request) {
   // 1. Gateway Pod receives request
-  // Load balanced across gateway replicas
+  // - Load balanced across gateway replicas (scales with HTTP traffic)
+  // - Direct TCP connection to Redis
   gatewayPod.receive({
     title: "Albert_Einstein",
     sourceLang: "en",
@@ -126,56 +87,44 @@ async function processArticle(request) {
   })
 
   // 2. Redis Pod - Article Caching
+  // - Primary pod with 2 replicas for HA
+  // - Data replication across replicas
+  // - Persistent volume for data storage
   const article = await redisPod.getOrFetch(request.title)
   // On cache miss, fetches from Wikipedia
   // Stores with 24h TTL
 
   // 3. Processor Pods - Work Queue
-  // Paragraphs distributed via Redis work queue
-  const workQueue = {
-    add: "Gateway adds paragraphs to queue",
-    process: "Processor pods consume from queue",
-    monitor: "HPA watches queue length"
-  }
+  // - Uses Redis pub/sub for work distribution
+  // - HPA scales pods based on queue length
+  // - Each pod manages own Claude API rate limits
+  const paragraphs = splitIntoParagraphs(article)
+  await workQueue.addBatch(paragraphs)
 
   // 4. Processor Pod - Each pod runs:
   class ProcessorPod {
     // Shared frequency data cached in pod memory
+    // Connection pooling for Claude API calls
     freqData = loadFrequencyDictionaries()
     
     async processQueue() {
       while (true) {
-        // Get next paragraph(s) from queue
+        // Get next work via Redis pub/sub
         const work = await queue.getNext()
         
         // Process with Claude API
-        // Connection pooling per pod
+        // Rate limits managed per pod
         const result = await this.processWithClaude(work)
         
-        // Mark work complete
+        // Mark work complete via pub/sub
         await queue.complete(work.id, result)
       }
     }
   }
 
   // 5. Gateway Pod - Result Assembly
+  // Collects results via Redis pub/sub
   return gatewayPod.assembleAndRespond(results)
-}
-
-// Key Scaling Points:
-const scaling = {
-  gatewayPods: "Scales on HTTP traffic",
-  processorPods: "Scales on queue length",
-  claudeAPI: "Rate limits managed per pod",
-  redis: "Data replication across replicas"
-}
-
-// Pod Communication:
-const dataFlow = {
-  gateway_to_redis: "Direct TCP connection",
-  gateway_to_queue: "Redis pub/sub",
-  processor_to_claude: "HTTPS with connection pool",
-  processor_to_queue: "Redis pub/sub"
 }
 ```
 
