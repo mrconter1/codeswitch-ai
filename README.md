@@ -81,19 +81,30 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
   // - Handles initial request validation
   validateAndParseRequest()
 
-  // Redis Pod
+  // Redis Pod Cluster
   // - Primary + replicas, persistent storage
+  // - Handles both caching and rate limiting
+  // - Global rate limiting across all pods
   wikipediaHtml = getFromCacheOrWikipedia(title)
+  
+  // Global Rate Limiter
+  // - Distributed rate limiting using Redis
+  // - Enforces cluster-wide Claude API limits
+  // - Configurable RPM/TPM limits
+  // - Automatic request queuing when near limits
+  rateLimiter = getGlobalRateLimiter()
 
   // Parser Pod
   // - Handles HTML parsing and text extraction
   // - Prepares work units
+  // - Estimates Claude API calls needed
   paragraphs = splitHtmlIntoParagraphs(wikipediaHtml)
 
   // RabbitMQ Message Broker
   // - Durable queues for reliability
   // - Fan-out exchange for work distribution
   // - Dead letter queue for failed jobs
+  // - Rate limit aware message scheduling
   publishParagraphsToQueue(paragraphs)
 
   // Multiple Processor Pods
@@ -104,13 +115,22 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
   foreach processor in processorPool:
     while hasWork:
       paragraph = consumeFromQueue()
+      
+      // Rate Limit Check
+      // - Check global rate limit before processing
+      // - Back-off if limit exceeded
+      // - Requeue message if needed
+      if !rateLimiter.Allow(ctx):
+        requeueWithBackoff(paragraph)
+        continue
+      
       frequencyData = getLanguageFrequencies(sourceLang)
       wordsToTranslate = selectWordsByFrequency(paragraph, frequencyData, percent)
       
       // Claude API interaction
       // - Connection pooling
-      // - Rate limiting per pod
-      // - Automatic retries
+      // - Automatic retries with exponential backoff
+      // - Rate limit aware retries
       codeSwitchedText = askClaudeToTranslate(
         paragraph,
         wordsToTranslate,
@@ -118,7 +138,6 @@ returnPartiallyCodeSwitchedWikipediaArticle(title, sourceLang, targetLang, perce
       )
       
       // Results handling
-      // - Publish to results exchange
       publishResult(codeSwitchedText)
 
   // Result Collector Pod
